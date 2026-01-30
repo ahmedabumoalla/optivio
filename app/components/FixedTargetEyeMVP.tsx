@@ -1,7 +1,18 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import {
+  FaceLandmarker,
+  FilesetResolver,
+  type FaceLandmarkerResult,
+} from '@mediapipe/tasks-vision';
+
+/**
+ * MediaPipe Face Landmarks (شائعة الاستخدام)
+ * زاوية العين الخارجية ≈ أقرب تمثيل عملي لموضع تحفيز orbicularis oculi
+ */
+const LEFT_EYE_OUTER = 33;
+const RIGHT_EYE_OUTER = 263;
 
 type TargetPos = { xPct: number; yPct: number; rPx: number };
 type CamFacing = 'user' | 'environment';
@@ -11,14 +22,16 @@ export default function FixedTargetEyeMVP() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [facingMode, setFacingMode] = useState<CamFacing>('user');
 
-  // دائرة ثابتة على الشاشة (نسبياً)
+  // نقطة المعايرة الأولية (للضبط اليدوي قبل القفل)
   const [target, setTarget] = useState<TargetPos>({ xPct: 62, yPct: 42, rPx: 18 });
-  const [editMode, setEditMode] = useState(true);
+
+  // قفل المعايرة
+  const [locked, setLocked] = useState(false);
 
   const [faceDetected, setFaceDetected] = useState(false);
   const [fps, setFps] = useState(0);
@@ -26,8 +39,18 @@ export default function FixedTargetEyeMVP() {
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // نخزن آخر قياسات للستيج عشان الرسم يكون ثابت على كل الأجهزة
-  const stageSizeRef = useRef<{ w: number; h: number; dpr: number }>({ w: 0, h: 0, dpr: 1 });
+  // أي عين نستخدم
+  const eyeSideRef = useRef<'left' | 'right'>('right');
+
+  // offset بين العين والنقطة (يُحسب وقت القفل)
+  const offsetRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  // قياسات المسرح للرسم الدقيق على الجوال
+  const stageSizeRef = useRef<{ w: number; h: number; dpr: number }>({
+    w: 0,
+    h: 0,
+    dpr: 1,
+  });
 
   const styles = useMemo(() => {
     return {
@@ -52,29 +75,25 @@ export default function FixedTargetEyeMVP() {
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: 10,
-        padding: '12px 12px',
+        padding: 12,
         borderRadius: 14,
         border: '1px solid rgba(255,255,255,0.12)',
         background: 'rgba(255,255,255,0.06)',
       } as React.CSSProperties,
 
-      titleWrap: { display: 'flex', flexDirection: 'column', gap: 2 } as React.CSSProperties,
-      title: { fontSize: 14, fontWeight: 800, letterSpacing: 0.2 } as React.CSSProperties,
-      sub: { fontSize: 12, opacity: 0.8 } as React.CSSProperties,
+      title: { fontSize: 14, fontWeight: 800 } as React.CSSProperties,
 
       badge: (ok: boolean) =>
         ({
-          padding: '7px 10px',
+          padding: '6px 10px',
           borderRadius: 999,
           fontSize: 12,
           fontWeight: 700,
           border: `1px solid ${ok ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}`,
           background: ok ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
           color: ok ? '#86efac' : '#fca5a5',
-          whiteSpace: 'nowrap',
         }) as React.CSSProperties,
 
-      // layout: موبايل = عمود، ديسكتوب = صف
       main: {
         display: 'grid',
         gridTemplateColumns: '1fr',
@@ -87,7 +106,6 @@ export default function FixedTargetEyeMVP() {
         overflow: 'hidden',
         border: '1px solid rgba(255,255,255,0.12)',
         background: '#000',
-        // موبايل: ارتفاع كبير عشان تجربة كاميرا حقيقية
         height: 'min(72dvh, 620px)',
       } as React.CSSProperties,
 
@@ -95,7 +113,6 @@ export default function FixedTargetEyeMVP() {
         width: '100%',
         height: '100%',
         objectFit: 'cover',
-        // المرآة فقط للكاميرا الأمامية (user)
         transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
       } as React.CSSProperties,
 
@@ -137,179 +154,154 @@ export default function FixedTargetEyeMVP() {
           flex: '1 1 auto',
         }) as React.CSSProperties,
 
-      chip: (active: boolean) =>
-        ({
-          padding: '9px 10px',
-          borderRadius: 12,
-          fontWeight: 800,
-          fontSize: 12,
-          cursor: 'pointer',
-          border: '1px solid rgba(255,255,255,0.14)',
-          background: active ? 'rgba(255,255,255,0.14)' : 'transparent',
-          color: '#fff',
-        }) as React.CSSProperties,
-
       label: { fontSize: 12, opacity: 0.85, fontWeight: 700 } as React.CSSProperties,
       slider: { width: '100%' } as React.CSSProperties,
 
-      note: {
-        fontSize: 12,
-        lineHeight: 1.6,
-        opacity: 0.85,
-        marginTop: 2,
-      } as React.CSSProperties,
-
-      err: { color: '#fecaca', fontSize: 12, lineHeight: 1.6 } as React.CSSProperties,
+      note: { fontSize: 12, opacity: 0.85, lineHeight: 1.6 } as React.CSSProperties,
+      err: { color: '#fecaca', fontSize: 12 } as React.CSSProperties,
 
       footer: {
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 10,
         fontSize: 12,
-        opacity: 0.85,
+        opacity: 0.8,
         padding: '0 4px',
-      } as React.CSSProperties,
-
-      // desktop تحسين: صف عمودين
-      desktopGrid: {
-        gridTemplateColumns: '1.6fr 1fr',
-        alignItems: 'start',
       } as React.CSSProperties,
     };
   }, [facingMode]);
 
-  // ===== Helpers: ResizeObserver لضبط أبعاد الكانفس بدقة =====
+  // ===== ResizeObserver =====
   useEffect(() => {
     if (!stageRef.current) return;
-
     const ro = new ResizeObserver(() => {
-      const el = stageRef.current!;
-      const rect = el.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      stageSizeRef.current = { w: rect.width, h: rect.height, dpr };
-      // ارسم فورًا بعد أي resize
-      if (running) drawFixedTarget();
+      const rect = stageRef.current!.getBoundingClientRect();
+      stageSizeRef.current = {
+        w: rect.width,
+        h: rect.height,
+        dpr: window.devicePixelRatio || 1,
+      };
+      if (running) drawAnchoredTarget(lastResultRef.current);
     });
-
     ro.observe(stageRef.current);
     return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
 
   // ===== Start / Stop =====
   async function start() {
     setError(null);
+    offsetRef.current = null;
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError('المتصفح لا يدعم تشغيل الكاميرا.');
-      return;
-    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode },
+      audio: false,
+    });
 
-    try {
-      // شغّل الكاميرا
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode }, // user أو environment
-        audio: false,
-      });
+    const video = videoRef.current!;
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    await video.play();
 
-      const video = videoRef.current!;
-      video.srcObject = stream;
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+    );
 
-      // مهم للجوال (خصوصًا iOS)
-      video.muted = true;
-      video.playsInline = true;
+    landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+      },
+      runningMode: 'VIDEO',
+      numFaces: 1,
+    });
 
-      await video.play();
-
-      // جهز FaceLandmarker (مؤشر فقط)
-      const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-      );
-
-      landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        },
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false,
-        runningMode: 'VIDEO',
-        numFaces: 1,
-      });
-
-      setRunning(true);
-      loop();
-    } catch (e: any) {
-      setError(e?.message ?? 'فشل تشغيل الكاميرا.');
-    }
+    setRunning(true);
+    loop();
   }
 
   function stop() {
     setRunning(false);
     setFaceDetected(false);
     setFps(0);
+    offsetRef.current = null;
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
 
     const video = videoRef.current;
     if (video?.srcObject) {
-      const tracks = (video.srcObject as MediaStream).getTracks();
-      tracks.forEach((t) => t.stop());
+      (video.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
       video.srcObject = null;
     }
 
     landmarkerRef.current?.close();
     landmarkerRef.current = null;
 
-    // نظّف الكانفس
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
   }
 
-  // ===== الرسم: دائرة ثابتة على الشاشة =====
-  function drawFixedTarget() {
+  // ===== رسم النقطة المرتبطة بالوجه =====
+  const lastResultRef = useRef<FaceLandmarkerResult | null>(null);
+
+  function drawAnchoredTarget(res: FaceLandmarkerResult | null) {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !res) return;
 
     const { w, h, dpr } = stageSizeRef.current;
     if (!w || !h) return;
 
-    // ضبط كانفس فعلي (مهم للجوال)
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // ارسم بوحدات CSS px
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const cx = (target.xPct / 100) * w;
-    const cy = (target.yPct / 100) * h;
+    const faces = res.faceLandmarks;
+    if (!faces || faces.length === 0) return; // اختفاء عند خروج الوجه
+
+    const lm = faces[0];
+    const idx = eyeSideRef.current === 'right' ? RIGHT_EYE_OUTER : LEFT_EYE_OUTER;
+    const eye = lm[idx];
+    if (!eye) return;
+
+    const ex = eye.x * w;
+    const ey = eye.y * h;
+
+    // حساب offset وقت القفل فقط
+    if (locked && !offsetRef.current) {
+      offsetRef.current = {
+        dx: (target.xPct / 100) * w - ex,
+        dy: (target.yPct / 100) * h - ey,
+      };
+    }
+
+    const dx = offsetRef.current?.dx ?? 0;
+    const dy = offsetRef.current?.dy ?? 0;
+
+    const cx = ex + dx;
+    const cy = ey + dy;
 
     // Glow
     ctx.beginPath();
-    ctx.arc(cx, cy, target.rPx + 12, 0, Math.PI * 2);
+    ctx.arc(cx, cy, target.rPx + 10, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,0,0,0.12)';
     ctx.fill();
 
     // Ring
     ctx.beginPath();
     ctx.arc(cx, cy, target.rPx, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255, 60, 60, 0.95)';
+    ctx.strokeStyle = 'rgba(255,60,60,0.95)';
     ctx.lineWidth = 3;
     ctx.stroke();
 
     // Center dot
     ctx.beginPath();
     ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255, 60, 60, 0.95)';
+    ctx.fillStyle = 'rgba(255,60,60,0.95)';
     ctx.fill();
   }
 
@@ -320,11 +312,11 @@ export default function FixedTargetEyeMVP() {
   function loop() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
-
     if (!video || !landmarker) return;
 
     const now = performance.now();
-    const res: FaceLandmarkerResult = landmarker.detectForVideo(video, now);
+    const res = landmarker.detectForVideo(video, now);
+    lastResultRef.current = res;
 
     setFaceDetected((res.faceLandmarks?.length ?? 0) > 0);
 
@@ -335,50 +327,28 @@ export default function FixedTargetEyeMVP() {
       lastT = now;
     }
 
-    drawFixedTarget();
+    drawAnchoredTarget(res);
 
     if (running) rafRef.current = requestAnimationFrame(loop);
   }
 
-  // إعادة رسم عند تغير الإعدادات
-  useEffect(() => {
-    if (!running) return;
-    drawFixedTarget();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target.xPct, target.yPct, target.rPx, running]);
-
-  // تغيير الكاميرا: لازم نوقف ونشغل من جديد
-  useEffect(() => {
-    if (!running) return;
-    stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [facingMode]);
-
   useEffect(() => {
     return () => stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ميديا كويري بسيط بدون CSS خارجي: نحدد “desktop”
-  const isDesktop =
-    typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(min-width: 900px)').matches;
 
   return (
     <div style={styles.page}>
       <div style={styles.shell}>
         <div style={styles.header}>
-          <div style={styles.titleWrap}>
-            <div style={styles.title}>Optivio MVP — Live Camera + Fixed Eye Target</div>
-            <div style={styles.sub}>
-              Fixed target (screen-locked) + Face detection indicator · Mobile-ready
-            </div>
+          <div style={styles.title}>Optivio MVP — Eye Muscle Anchoring</div>
+          <div style={styles.badge(faceDetected)}>
+            {running ? (faceDetected ? 'Face detected' : 'No face') : 'Stopped'}
           </div>
-          <div style={styles.badge(faceDetected)}>{running ? (faceDetected ? 'Face detected' : 'No face') : 'Stopped'}</div>
         </div>
 
-        <div style={{ ...styles.main, ...(isDesktop ? styles.desktopGrid : {}) }}>
+        <div style={styles.main}>
           <div ref={stageRef} style={styles.stage}>
-            <video ref={videoRef} playsInline muted style={styles.video} />
+            <video ref={videoRef} style={styles.video} />
             <canvas ref={canvasRef} style={styles.canvas} />
           </div>
 
@@ -395,89 +365,72 @@ export default function FixedTargetEyeMVP() {
               )}
               <button
                 style={styles.btn('ghost')}
-                onClick={() => setEditMode((v) => !v)}
+                onClick={() => {
+                  setLocked((v) => !v);
+                  if (!locked) offsetRef.current = null;
+                }}
                 disabled={!running}
-                title={!running ? 'شغّل الكاميرا أولاً' : ''}
               >
-                {editMode ? 'قفل الموضع' : 'تعديل الموضع'}
-              </button>
-            </div>
-
-            {/* اختيار الكاميرا */}
-            <div style={styles.row}>
-              <button
-                style={styles.chip(facingMode === 'user')}
-                onClick={() => setFacingMode('user')}
-                disabled={running}
-                title={running ? 'أوقف الكاميرا ثم بدّل' : ''}
-              >
-                كاميرا أمامية
-              </button>
-              <button
-                style={styles.chip(facingMode === 'environment')}
-                onClick={() => setFacingMode('environment')}
-                disabled={running}
-                title={running ? 'أوقف الكاميرا ثم بدّل' : ''}
-              >
-                كاميرا خلفية
+                {locked ? 'تعديل الموضع' : 'قفل الموضع'}
               </button>
             </div>
 
             <div>
-              <div style={styles.label}>Target X (٪ من عرض الشاشة): {target.xPct}</div>
+              <div style={styles.label}>X %</div>
               <input
                 style={styles.slider}
                 type="range"
                 min={0}
                 max={100}
                 value={target.xPct}
-                onChange={(e) => editMode && setTarget((t) => ({ ...t, xPct: Number(e.target.value) }))}
-                disabled={!running || !editMode}
+                onChange={(e) =>
+                  !locked && setTarget((t) => ({ ...t, xPct: Number(e.target.value) }))
+                }
+                disabled={!running || locked}
               />
             </div>
 
             <div>
-              <div style={styles.label}>Target Y (٪ من ارتفاع الشاشة): {target.yPct}</div>
+              <div style={styles.label}>Y %</div>
               <input
                 style={styles.slider}
                 type="range"
                 min={0}
                 max={100}
                 value={target.yPct}
-                onChange={(e) => editMode && setTarget((t) => ({ ...t, yPct: Number(e.target.value) }))}
-                disabled={!running || !editMode}
+                onChange={(e) =>
+                  !locked && setTarget((t) => ({ ...t, yPct: Number(e.target.value) }))
+                }
+                disabled={!running || locked}
               />
             </div>
 
             <div>
-              <div style={styles.label}>Radius (px): {target.rPx}</div>
+              <div style={styles.label}>Radius</div>
               <input
                 style={styles.slider}
                 type="range"
                 min={10}
                 max={48}
                 value={target.rPx}
-                onChange={(e) => editMode && setTarget((t) => ({ ...t, rPx: Number(e.target.value) }))}
-                disabled={!running || !editMode}
+                onChange={(e) =>
+                  !locked && setTarget((t) => ({ ...t, rPx: Number(e.target.value) }))
+                }
+                disabled={!running || locked}
               />
             </div>
 
             {error && <div style={styles.err}>{error}</div>}
 
             <div style={styles.note}>
-              ✅ الدائرة ثابتة على الشاشة (Screen-fixed) لتعطي إحساس “تحديد موضع”.<br />
-              ✅ تشتغل على الجوال + فيرسال (HTTPS).<br />
-              ⚠ إذا كنت على iPhone: افتح من Safari/Chrome على iOS واسمح بالوصول للكاميرا.
+              النقطة مرتبطة بعضلة العين وتتحرك مع الوجه. تختفي عند خروج الوجه.
             </div>
           </div>
         </div>
 
         <div style={styles.footer}>
-          <div>
-            <span style={{ opacity: 0.75 }}>FPS:</span> {fps} &nbsp;·&nbsp;{' '}
-            <span style={{ opacity: 0.75 }}>Mode:</span> {editMode ? 'Edit' : 'Locked'}
-          </div>
-          <div style={{ opacity: 0.75 }}>Next.js (app/) + MediaPipe Tasks Vision</div>
+          <div>FPS: {fps}</div>
+          <div>MediaPipe Face Landmarks</div>
         </div>
       </div>
     </div>
