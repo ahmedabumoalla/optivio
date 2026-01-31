@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import { useRouter } from 'next/navigation'; // استدعاء للتنقل
 
 // --- إعدادات وتعاريف ---
 type Point = { x: number; y: number };
 
 export default function OptivioPro() {
+  const router = useRouter(); // لاستخدام التوجيه
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -26,7 +28,7 @@ export default function OptivioPro() {
   const rafRef = useRef<number | null>(null);
   const videoSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
 
-  // ===== 1. تحميل موديل الذكاء الاصطناعي فور فتح الصفحة =====
+  // ===== 1. تحميل موديل الذكاء الاصطناعي =====
   useEffect(() => {
     async function loadModel() {
       try {
@@ -48,7 +50,7 @@ export default function OptivioPro() {
         setStatusText('النظام جاهز. اضغط تشغيل.');
       } catch (err) {
         console.error(err);
-        setStatusText('فشل تحميل الموديل. تأكد من الإنترنت.');
+        setStatusText('فشل تحميل الموديل.');
       }
     }
     loadModel();
@@ -57,22 +59,13 @@ export default function OptivioPro() {
   // ===== 2. تشغيل الكاميرا =====
   async function startCamera() {
     if (!landmarkerRef.current) return;
-
     try {
-      // طلب الكاميرا الأمامية
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false
       });
-
       const video = videoRef.current!;
       video.srcObject = stream;
-      
-      // انتظار حتى تبدأ الكاميرا بالعمل فعلياً لنعرف أبعادها الحقيقية
       video.onloadedmetadata = () => {
         video.play();
         videoSizeRef.current = { w: video.videoWidth, h: video.videoHeight };
@@ -80,14 +73,13 @@ export default function OptivioPro() {
         setStatusText('جاري المسح...');
         predictLoop();
       };
-
     } catch (err) {
       console.error(err);
       setStatusText('يرجى السماح للكاميرا بالعمل.');
     }
   }
 
-  // ===== 3. حلقة التحليل (The Loop) =====
+  // ===== 3. حلقة التحليل (The Loop) - (لم يتم لمس المنطق) =====
   function predictLoop() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
@@ -105,7 +97,6 @@ export default function OptivioPro() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // ضبط حجم الكانفس ليطابق حجم العرض (Responsive)
     const displayWidth = containerRef.current?.clientWidth || 640;
     const displayHeight = containerRef.current?.clientHeight || 480;
     canvas.width = displayWidth;
@@ -117,27 +108,17 @@ export default function OptivioPro() {
       setStatusText('تم تحديد العصب الوجهي');
       
       const landmarks = results.faceLandmarks[0];
-      // النقطة 205 (Zygomatic) أو 101 أو 50
       const target = landmarks[205]; 
 
-      // --- الخوارزمية الحرجة: تحويل إحداثيات الفيديو إلى إحداثيات الشاشة ---
-      // (Mapping Logic for object-fit: cover)
       const videoW = videoSizeRef.current.w;
       const videoH = videoSizeRef.current.h;
-      
-      // 1. حساب نسبة التغطية (Cover Scale)
       const scale = Math.max(displayWidth / videoW, displayHeight / videoH);
-      
-      // 2. حساب الإزاحة (Offset) لتوسيط الفيديو
       const xOffset = (displayWidth - (videoW * scale)) / 2;
       const yOffset = (displayHeight - (videoH * scale)) / 2;
 
-      // 3. تطبيق المعادلة: (النقطة * العرض الأصلي * التكبير) + الإزاحة
-      // ملاحظة: نعكس X لأن الكاميرا الأمامية معكوسة (Mirrored)
       const realX = ((1 - target.x) * videoW * scale) + xOffset;
       const realY = (target.y * videoH * scale) + yOffset;
 
-      // التنعيم الحركي (Lerp)
       currentPosRef.current.x = lerp(currentPosRef.current.x, realX, 0.3);
       currentPosRef.current.y = lerp(currentPosRef.current.y, realY, 0.3);
 
@@ -151,38 +132,28 @@ export default function OptivioPro() {
     rafRef.current = requestAnimationFrame(predictLoop);
   }
 
-  // دالة التنعيم
   function lerp(start: number, end: number, amt: number) {
     return (1 - amt) * start + amt * end;
   }
 
-  // رسم القطب
   function drawElectrode(ctx: CanvasRenderingContext2D, x: number, y: number) {
-    // Glow
     const gradient = ctx.createRadialGradient(x, y, 5, x, y, 30);
     gradient.addColorStop(0, '#fff');
     gradient.addColorStop(0.2, '#4bc7c5');
     gradient.addColorStop(1, 'transparent');
-
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(x, y, 30, 0, 2 * Math.PI);
     ctx.fill();
-
-    // Core
     ctx.fillStyle = '#fff';
     ctx.beginPath();
     ctx.arc(x, y, 6, 0, 2 * Math.PI);
     ctx.fill();
-
-    // Ring
     ctx.strokeStyle = '#4bc7c5';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(x, y, 15, 0, 2 * Math.PI);
     ctx.stroke();
-
-    // Connecting Line Simulation
     ctx.strokeStyle = 'rgba(75, 199, 197, 0.5)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -190,12 +161,53 @@ export default function OptivioPro() {
     ctx.lineTo(x + 50, y);
     ctx.lineTo(x + 70, y - 20);
     ctx.stroke();
-    
-    // Data Text
     ctx.fillStyle = '#4bc7c5';
     ctx.font = '12px monospace';
     ctx.fillText('NERVE TARGET LOCKED', x + 55, y - 25);
   }
+
+  // ===== 4. وظائف جديدة (التقاط + تنقل) =====
+  
+  const handleCapture = () => {
+    if (!videoRef.current) return;
+    
+    // 1. إنشاء كانفس مؤقت للدمج
+    const tempCanvas = document.createElement('canvas');
+    const video = videoRef.current;
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
+    const ctx = tempCanvas.getContext('2d');
+    
+    if (ctx) {
+      // رسم الفيديو (مع عكسه لأنه كاميرا أمامية)
+      ctx.translate(tempCanvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0);
+      
+      // تحويل الصورة لرابط (Base64)
+      const imageSrc = tempCanvas.toDataURL('image/png');
+      
+      // هنا سنقوم لاحقاً بربط Supabase
+      // مثال: uploadToSupabase(imageSrc);
+      console.log("Image Captured!", imageSrc.slice(0, 50) + "...");
+      
+      // محاكاة التنزيل حالياً عشان تتأكد إنه شغال
+      const link = document.createElement('a');
+      link.href = imageSrc;
+      link.download = `optivio-scan-${Date.now()}.png`;
+      link.click();
+    }
+  };
+
+  const handleGoDashboard = () => {
+    // إيقاف الكاميرا قبل الخروج (اختياري لتنظيف الذاكرة)
+    if (videoRef.current && videoRef.current.srcObject) {
+       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+       tracks.forEach(t => t.stop());
+    }
+    // التنقل
+    router.push('/dashboard');
+  };
 
   return (
     <div style={{ 
@@ -218,8 +230,8 @@ export default function OptivioPro() {
           style={{ 
             width: '100%', 
             height: '100%', 
-            objectFit: 'cover', // يملأ الشاشة بالكامل
-            transform: 'scaleX(-1)' // وضع المرآة
+            objectFit: 'cover', 
+            transform: 'scaleX(-1)' 
           }} 
         />
         <canvas 
@@ -235,7 +247,7 @@ export default function OptivioPro() {
         />
       </div>
 
-      {/* UI Overlay */}
+      {/* UI Overlay - Top */}
       <div style={{
         position: 'absolute',
         top: 20, left: 20, right: 20,
@@ -289,11 +301,61 @@ export default function OptivioPro() {
           ) : (
             <div style={{ color: '#fff' }}>جاري تهيئة الذكاء الاصطناعي...</div>
           )}
-          <p style={{ color: '#888', marginTop: 20, fontSize: 12, maxWidth: 300, textAlign: 'center' }}>
-            نستخدم تقنية Face Mesh عالية الدقة. يرجى السماح للكاميرا والانتظار قليلاً.
-          </p>
         </div>
       )}
+
+      {/* ===== NEW: Bottom Action Bar (Capture + Dashboard) ===== */}
+      {running && (
+        <div style={{
+          position: 'absolute',
+          bottom: 30,
+          left: 0, 
+          right: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 20,
+          zIndex: 15
+        }}>
+          {/* زر التقاط صورة */}
+          <button 
+            onClick={handleCapture}
+            style={{
+              width: 60, height: 60,
+              borderRadius: '50%',
+              background: 'transparent',
+              border: '4px solid #fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 0 10px rgba(0,0,0,0.5)'
+            }}
+          >
+            <div style={{ width: 50, height: 50, borderRadius: '50%', background: '#fff' }} />
+          </button>
+
+          {/* زر الداشبورد */}
+          <button 
+            onClick={handleGoDashboard}
+            style={{
+              position: 'absolute',
+              right: 20,
+              bottom: 10,
+              background: 'rgba(0,0,0,0.6)',
+              border: '1px solid #4bc7c5',
+              color: '#4bc7c5',
+              padding: '10px 20px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontSize: 14,
+              backdropFilter: 'blur(4px)'
+            }}
+          >
+            لوحة التحكم &rarr;
+          </button>
+        </div>
+      )}
+
     </div>
   );
 }
