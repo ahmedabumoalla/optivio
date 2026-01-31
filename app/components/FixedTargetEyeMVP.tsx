@@ -109,8 +109,8 @@ export default function OptivioPro() {
       
       const landmarks = results.faceLandmarks[0];
       
-      // >>> التعديل هنا فقط: تغيير الرقم من 205 إلى 50 (نقطة أعلى أقرب للعين) <<<
-      const target = landmarks[50]; 
+      // >>> التعديل هنا فقط: النقطة 116 هي الأقرب للجفن السفلي <<<
+      const target = landmarks[116]; 
 
       const videoW = videoSizeRef.current.w;
       const videoH = videoSizeRef.current.h;
