@@ -79,7 +79,7 @@ export default function OptivioPro() {
     }
   }
 
-  // ===== 3. حلقة التحليل (The Loop) - كما هي تماماً =====
+  // ===== 3. حلقة التحليل (The Loop) =====
   function predictLoop() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
@@ -108,7 +108,9 @@ export default function OptivioPro() {
       setStatusText('تم تحديد العصب الوجهي');
       
       const landmarks = results.faceLandmarks[0];
-      const target = landmarks[205]; 
+      
+      // >>> التعديل هنا فقط: تغيير الرقم من 205 إلى 50 (نقطة أعلى أقرب للعين) <<<
+      const target = landmarks[50]; 
 
       const videoW = videoSizeRef.current.w;
       const videoH = videoSizeRef.current.h;
@@ -168,48 +170,38 @@ export default function OptivioPro() {
 
   // ===== 4. وظائف جديدة (التقاط + تنقل) =====
   
-  // -- تم التعديل هنا فقط لإصلاح دمج الصورة --
   const handleCapture = () => {
     if (!videoRef.current || !canvasRef.current || !containerRef.current) return;
     
     const video = videoRef.current;
     const overlayCanvas = canvasRef.current;
     
-    // نستخدم أبعاد الشاشة الحالية عشان الصورة تطلع نفس اللي يشوفه المستخدم بالضبط
     const displayWidth = containerRef.current.clientWidth;
     const displayHeight = containerRef.current.clientHeight;
     
-    // إنشاء كانفس مؤقت بنفس حجم العرض
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = displayWidth;
     tempCanvas.height = displayHeight;
     const ctx = tempCanvas.getContext('2d');
     
     if (ctx) {
-      // 1. رسم خلفية سوداء (أمان)
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, displayWidth, displayHeight);
 
-      // 2. حساب أبعاد الفيديو عشان يغطي الشاشة (نفس المنطق المستخدم في العرض)
       const videoW = video.videoWidth;
       const videoH = video.videoHeight;
       const scale = Math.max(displayWidth / videoW, displayHeight / videoH);
       const wScaled = videoW * scale;
       const hScaled = videoH * scale;
       
-      // 3. رسم الفيديو (معكوس أفقياً + متوسط في الشاشة)
       ctx.save();
-      // نحرك نقطة الرسم للمنتصف لنقوم بالقلب
       ctx.translate(displayWidth / 2, displayHeight / 2);
-      ctx.scale(-1, 1); // عكس الكاميرا
+      ctx.scale(-1, 1);
       ctx.drawImage(video, -wScaled / 2, -hScaled / 2, wScaled, hScaled);
       ctx.restore();
 
-      // 4. دمج الطبقة الشفافة (Overlay) التي تحتوي على النقطة
-      // ننسخ الكانفس المعروض حالياً فوق الفيديو
       ctx.drawImage(overlayCanvas, 0, 0, displayWidth, displayHeight);
       
-      // 5. الحفظ
       const imageSrc = tempCanvas.toDataURL('image/png');
       
       const link = document.createElement('a');
