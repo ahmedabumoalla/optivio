@@ -2,13 +2,13 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from '@mediapipe/tasks-vision';
-import { useRouter } from 'next/navigation'; // استدعاء للتنقل
+import { useRouter } from 'next/navigation';
 
 // --- إعدادات وتعاريف ---
 type Point = { x: number; y: number };
 
 export default function OptivioPro() {
-  const router = useRouter(); // لاستخدام التوجيه
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -21,7 +21,7 @@ export default function OptivioPro() {
   
   // تتبع النقطة
   const [targetPoint, setTargetPoint] = useState<Point>({ x: 0, y: 0 });
-  const currentPosRef = useRef<Point>({ x: 0, y: 0 }); // للتنعيم الحركي
+  const currentPosRef = useRef<Point>({ x: 0, y: 0 }); 
 
   // مراجع تقنية
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
@@ -79,7 +79,7 @@ export default function OptivioPro() {
     }
   }
 
-  // ===== 3. حلقة التحليل (The Loop) - (لم يتم لمس المنطق) =====
+  // ===== 3. حلقة التحليل (The Loop) - كما هي تماماً =====
   function predictLoop() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
@@ -168,30 +168,50 @@ export default function OptivioPro() {
 
   // ===== 4. وظائف جديدة (التقاط + تنقل) =====
   
+  // -- تم التعديل هنا فقط لإصلاح دمج الصورة --
   const handleCapture = () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !canvasRef.current || !containerRef.current) return;
     
-    // 1. إنشاء كانفس مؤقت للدمج
-    const tempCanvas = document.createElement('canvas');
     const video = videoRef.current;
-    tempCanvas.width = video.videoWidth;
-    tempCanvas.height = video.videoHeight;
+    const overlayCanvas = canvasRef.current;
+    
+    // نستخدم أبعاد الشاشة الحالية عشان الصورة تطلع نفس اللي يشوفه المستخدم بالضبط
+    const displayWidth = containerRef.current.clientWidth;
+    const displayHeight = containerRef.current.clientHeight;
+    
+    // إنشاء كانفس مؤقت بنفس حجم العرض
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = displayWidth;
+    tempCanvas.height = displayHeight;
     const ctx = tempCanvas.getContext('2d');
     
     if (ctx) {
-      // رسم الفيديو (مع عكسه لأنه كاميرا أمامية)
-      ctx.translate(tempCanvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0);
+      // 1. رسم خلفية سوداء (أمان)
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+      // 2. حساب أبعاد الفيديو عشان يغطي الشاشة (نفس المنطق المستخدم في العرض)
+      const videoW = video.videoWidth;
+      const videoH = video.videoHeight;
+      const scale = Math.max(displayWidth / videoW, displayHeight / videoH);
+      const wScaled = videoW * scale;
+      const hScaled = videoH * scale;
       
-      // تحويل الصورة لرابط (Base64)
+      // 3. رسم الفيديو (معكوس أفقياً + متوسط في الشاشة)
+      ctx.save();
+      // نحرك نقطة الرسم للمنتصف لنقوم بالقلب
+      ctx.translate(displayWidth / 2, displayHeight / 2);
+      ctx.scale(-1, 1); // عكس الكاميرا
+      ctx.drawImage(video, -wScaled / 2, -hScaled / 2, wScaled, hScaled);
+      ctx.restore();
+
+      // 4. دمج الطبقة الشفافة (Overlay) التي تحتوي على النقطة
+      // ننسخ الكانفس المعروض حالياً فوق الفيديو
+      ctx.drawImage(overlayCanvas, 0, 0, displayWidth, displayHeight);
+      
+      // 5. الحفظ
       const imageSrc = tempCanvas.toDataURL('image/png');
       
-      // هنا سنقوم لاحقاً بربط Supabase
-      // مثال: uploadToSupabase(imageSrc);
-      console.log("Image Captured!", imageSrc.slice(0, 50) + "...");
-      
-      // محاكاة التنزيل حالياً عشان تتأكد إنه شغال
       const link = document.createElement('a');
       link.href = imageSrc;
       link.download = `optivio-scan-${Date.now()}.png`;
@@ -200,12 +220,10 @@ export default function OptivioPro() {
   };
 
   const handleGoDashboard = () => {
-    // إيقاف الكاميرا قبل الخروج (اختياري لتنظيف الذاكرة)
     if (videoRef.current && videoRef.current.srcObject) {
        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
        tracks.forEach(t => t.stop());
     }
-    // التنقل
     router.push('/dashboard');
   };
 
@@ -221,7 +239,6 @@ export default function OptivioPro() {
       fontFamily: 'sans-serif'
     }}>
       
-      {/* Container - Full Screen */}
       <div ref={containerRef} style={{ flex: 1, position: 'relative' }}>
         <video 
           ref={videoRef} 
@@ -247,7 +264,6 @@ export default function OptivioPro() {
         />
       </div>
 
-      {/* UI Overlay - Top */}
       <div style={{
         position: 'absolute',
         top: 20, left: 20, right: 20,
@@ -269,7 +285,6 @@ export default function OptivioPro() {
         </div>
       </div>
 
-      {/* Start Button Overlay */}
       {!running && (
         <div style={{
           position: 'absolute',
@@ -304,7 +319,6 @@ export default function OptivioPro() {
         </div>
       )}
 
-      {/* ===== NEW: Bottom Action Bar (Capture + Dashboard) ===== */}
       {running && (
         <div style={{
           position: 'absolute',
@@ -316,7 +330,6 @@ export default function OptivioPro() {
           gap: 20,
           zIndex: 15
         }}>
-          {/* زر التقاط صورة */}
           <button 
             onClick={handleCapture}
             style={{
@@ -334,7 +347,6 @@ export default function OptivioPro() {
             <div style={{ width: 50, height: 50, borderRadius: '50%', background: '#fff' }} />
           </button>
 
-          {/* زر الداشبورد */}
           <button 
             onClick={handleGoDashboard}
             style={{
