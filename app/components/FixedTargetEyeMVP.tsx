@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image'; // استيراد الصور
 
 // --- إعدادات وتعاريف ---
 type Point = { x: number; y: number };
@@ -109,7 +110,7 @@ export default function OptivioPro() {
       
       const landmarks = results.faceLandmarks[0];
       
-      // >>> التعديل هنا فقط: النقطة 116 هي الأقرب للجفن السفلي <<<
+      // النقطة 116 (الأقرب للجفن السفلي كما طلبت)
       const target = landmarks[116]; 
 
       const videoW = videoSizeRef.current.w;
@@ -264,7 +265,17 @@ export default function OptivioPro() {
         alignItems: 'center',
         zIndex: 10
       }}>
-        <div style={{ color: '#fff', fontWeight: 'bold' }}>Optivio AI</div>
+        {/* تم استبدال النص بالشعار */}
+        <div style={{ position: 'relative', width: '140px', height: '50px' }}>
+          <Image 
+            src="/logo.png" 
+            alt="Optivio" 
+            fill 
+            style={{ objectFit: 'contain', objectPosition: 'left' }} 
+            priority
+          />
+        </div>
+        
         <div style={{ 
           background: faceDetected ? 'rgba(75, 199, 197, 0.2)' : 'rgba(255, 0, 0, 0.2)',
           border: `1px solid ${faceDetected ? '#4bc7c5' : 'red'}`,
