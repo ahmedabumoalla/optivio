@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Activity, Battery, Bluetooth, Zap, Clock, ChevronLeft, MessageSquare, Send, X, Bot } from 'lucide-react';
+import { Activity, Battery, Bluetooth, Zap, Clock, ChevronLeft, Send, X, Bot } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image'; // استيراد مكون الصور
 
 export default function MedicalDashboard() {
   const router = useRouter();
@@ -43,10 +44,21 @@ export default function MedicalDashboard() {
           <button onClick={() => router.back()} className="p-2 rounded-full hover:bg-white/10 transition">
              <ChevronLeft className="text-[#4bc7c5]" />
           </button>
-          <div>
-            <h1 className="text-xl font-bold tracking-wider text-white">OPTIVIO <span className="text-[#4bc7c5] text-xs align-top">PRO</span></h1>
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest">Facial Nerve Stimulation Unit</p>
+          
+          {/* ===== تعديل الشعار هنا ===== */}
+          {/* تأكد من وضع صورة الشعار باسم logo.png داخل مجلد public */}
+          <div className="relative h-12 w-40 flex items-center">
+             {/* إذا لم تضع صورة بعد، سيظهر النص البديل، بمجرد وضع الصورة ستظهر هنا */}
+             <Image 
+               src="/logo.png" 
+               alt="Optivio Logo" 
+               width={160} 
+               height={48} 
+               className="object-contain object-left"
+               priority
+             />
           </div>
+          {/* =========================== */}
         </div>
         
         <div className="flex items-center gap-6 text-xs font-mono text-gray-400">
@@ -198,7 +210,7 @@ export default function MedicalDashboard() {
 
       </main>
 
-      {/* ===== NEW: Optivio AI Assistant Widget ===== */}
+      {/* ===== AI Chat Widget ===== */}
       <AIChatWidget />
       
     </div>
@@ -223,7 +235,6 @@ function AIChatWidget() {
     scrollToBottom();
   }, [messages, isOpen]);
 
-  // دالة تنظيف النص من الفواصل والنقاط (حسب الطلب)
   const cleanText = (text: string) => {
     return text.replace(/[.,،!؟?]/g, '').trim();
   };
@@ -232,19 +243,13 @@ function AIChatWidget() {
     if (!input.trim()) return;
 
     const userMsg = input;
-    setMessages(prev => [...prev, { role: 'user', text: cleanText(userMsg) }]); // تنظيف حتى مدخلات المستخدم للتوحيد
+    setMessages(prev => [...prev, { role: 'user', text: cleanText(userMsg) }]);
     setInput('');
     setIsTyping(true);
 
-    // --- منطقة ربط الذكاء الاصطناعي (Backend Connection) ---
-    // هنا تقوم بوضع كود الاتصال بـ OpenAI أو Gemini
-    // مثال: const response = await fetch('/api/chat', { method: 'POST', body: JSON.stringify({ message: userMsg }) });
-    
-    // محاكاة الرد (Simulation) لغرض العرض حالياً
     setTimeout(() => {
       let aiResponseRaw = "";
       
-      // منطق ردود بسيط للمحاكاة (استبدله بالـ API الحقيقي)
       if (userMsg.includes('شلل') || userMsg.includes('السابع')) {
         aiResponseRaw = "الشلل السابع هو ضعف مفاجئ في عضلات الوجه يجعل نصف الوجه يبدو مرتخياً تقنيتنا تساعد في استعادة النغمة العضلية عن طريق التحفيز الكهربائي الموجه";
       } else if (userMsg.includes('نظارة') || userMsg.includes('تعمل')) {
@@ -253,7 +258,6 @@ function AIChatWidget() {
         aiResponseRaw = "أنا هنا للإجابة على استفساراتك الطبية بخصوص الشلل الوجهي وآلية عمل نظارة أوبتيفيو هل لديك سؤال محدد حول جلسات العلاج";
       }
 
-      // تنظيف رد الذكاء الاصطناعي من أي علامات ترقيم قد تأتي من الـ API
       const cleanResponse = cleanText(aiResponseRaw);
       
       setMessages(prev => [...prev, { role: 'ai', text: cleanResponse }]);
@@ -263,7 +267,6 @@ function AIChatWidget() {
 
   return (
     <>
-      {/* Floating Button */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-[#4bc7c5] hover:bg-[#3baea2] text-black shadow-[0_0_20px_rgba(75,199,197,0.4)] transition-all transform hover:scale-110 flex items-center justify-center"
@@ -271,7 +274,6 @@ function AIChatWidget() {
         {isOpen ? <X size={28} strokeWidth={2.5} /> : <Bot size={28} strokeWidth={2.5} />}
       </button>
 
-      {/* Chat Window */}
       <AnimatePresence>
         {isOpen && (
           <motion.div 
@@ -280,7 +282,6 @@ function AIChatWidget() {
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             className="fixed bottom-24 right-6 z-50 w-[350px] h-[500px] bg-[#0a0a0a]/95 backdrop-blur-xl border border-[#333] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
           >
-            {/* Header */}
             <div className="p-4 border-b border-[#222] bg-[#111] flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-[#4bc7c5]/20 flex items-center justify-center border border-[#4bc7c5]/30">
                 <Bot className="text-[#4bc7c5]" size={20} />
@@ -294,7 +295,6 @@ function AIChatWidget() {
               </div>
             </div>
 
-            {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-[#333]">
               {messages.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -321,7 +321,6 @@ function AIChatWidget() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
             <div className="p-4 border-t border-[#222] bg-[#111]">
               <div className="flex items-center gap-2 bg-[#050505] border border-[#333] rounded-full px-4 py-2 focus-within:border-[#4bc7c5] transition-colors">
                 <input 
@@ -350,7 +349,7 @@ function AIChatWidget() {
   );
 }
 
-// --- Sub Components (KPIs & Pulse) ---
+// --- Sub Components ---
 
 function KPICard({ icon, label, value, unit, active = false, footer }: any) {
    return (
